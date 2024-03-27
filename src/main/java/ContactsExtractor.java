@@ -3,6 +3,7 @@ import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.xssf.usermodel.XSSFRow;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
@@ -86,12 +87,9 @@ public class ContactsExtractor {
 					s = b.toString();
 				}
 				final Cell cell = row.getCell(nameColumn);
-				String name;
-				try {
-					name = cell.getStringCellValue();
-				} catch (NullPointerException e) {
-					name = null;
-				}
+				final String name;
+				if (cell == null || cell.getCellType() == CellType.BLANK || cell.getStringCellValue().isEmpty()) name = null;
+				else name = cell.getStringCellValue();
 				contacts.add(new Contact(name, s));
 			}
 
@@ -107,8 +105,8 @@ public class ContactsExtractor {
 
 	List<Contact> contacts() {
 		try (ExecutorService service = Executors.newFixedThreadPool(2)) {
-			service.execute(() -> extractFromTxtFile());
-			service.execute(() -> extractFromExcelFile());
+			service.execute(this::extractFromTxtFile);
+			service.execute(this::extractFromExcelFile);
 		}
 		return contacts;
 	}
