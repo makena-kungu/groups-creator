@@ -4,20 +4,18 @@ import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFRow;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
 
 import java.io.*;
-import java.time.format.FormatStyle;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ContactsExtractor {
-	private final List<String> contacts = Collections.synchronizedList(new ArrayList<>());
+	private final List<Contact> contacts = Collections.synchronizedList(new ArrayList<>());
 
-	static List<String> contactList() {
+	static List<Contact> contactList() {
 		return new ContactsExtractor().contacts();
 	}
 
@@ -33,9 +31,9 @@ public class ContactsExtractor {
 			}
 			String[] strings = builder.toString().split(",");
 			for (String str : strings) {
-				contacts.add(format(str.trim()));
+				contacts.add(new Contact(format(str.trim())));
 			}
-			System.out.println("contacts      = " + Arrays.toString(contacts.toArray(new String[0])));
+			System.out.println("contacts      = " + Arrays.toString(contacts.toArray(new Contact[0])));
 			System.out.println("contacts size = " + contacts.size());
 		} catch (IOException e) {
 			throw new RuntimeException(e);
@@ -43,32 +41,39 @@ public class ContactsExtractor {
 	}
 
 	void extractFromExcelFile() {
-		var path = "C:\\Users\\USER\\IdeaProjects\\group_creator\\src\\main\\resources\\contacts.xlsx";
+		this.contacts.addAll(extractFromExcelFile("C:\\Users\\USER\\IdeaProjects\\group_creator\\src\\main\\resources\\contacts.xlsx"));
+	}
+
+	static List<Contact> extractFromExcelFile(String path) {
 		try (var workbook = XSSFWorkbookFactory.createWorkbook(OPCPackage.open(new File(path)))) {
 			var sht = workbook.getSheetAt(0);
-			int col = -1;
+			int valueColumn = -1;
+			int nameColumn = -1;
 			for (Cell cell : sht.getRow(0)) {
 				String value = cell.getStringCellValue();
+				if (value.equals("Name")) {
+					nameColumn = cell.getColumnIndex();
+					continue;
+				}
 				if (Objects.equals(value, "Phone 1 - Value")) {
-					col = cell.getColumnIndex();
+					valueColumn = cell.getColumnIndex();
 					break;
 				}
 			}
 
 			// iterate sheet rows
-			var contacts = new ArrayList<String>();
+			var contacts = new ArrayList<Contact>();
 
 			int i = 0;
 			for (Row row : sht) {
 				if (i++ == 0) continue;
 				String s;
-				Cell cell = row.getCell(col);
+				final Cell value = row.getCell(valueColumn);
 				try {
-					s = format(String.valueOf((long) cell.getNumericCellValue()));
-					System.out.println("s = " + s);
+					s = format(String.valueOf((long) value.getNumericCellValue()));
 				} catch (Exception e) {
-					String[] strings = cell.getStringCellValue().split(":");
-					var b = new StringBuilder();
+					final String[] strings = value.getStringCellValue().split(":");
+					final var b = new StringBuilder();
 					for (int i1 = 0, last = strings.length - 1; i1 <= last; i1++) {
 						String s1 = strings[i1].trim();
 						if (!s1.isEmpty()) {
@@ -80,34 +85,40 @@ public class ContactsExtractor {
 					}
 					s = b.toString();
 				}
-				contacts.add(s);
+				final Cell cell = row.getCell(nameColumn);
+				String name;
+				try {
+					name = cell.getStringCellValue();
+				} catch (NullPointerException e) {
+					name = null;
+				}
+				contacts.add(new Contact(name, s));
 			}
 
-			Object[] array = contacts.toArray();
-			System.out.println("contacts = " + Arrays.toString(array));
-
-			System.out.println("col = " + col);
+			System.out.println("contacts = " + Arrays.toString(contacts.toArray()));
+			System.out.println("col = " + valueColumn);
 			String sheetName = sht.getSheetName();
 			System.out.println("sheet name = " + sheetName);
+			return contacts;
 		} catch (IOException | InvalidFormatException e) {
 			throw new RuntimeException(e);
 		}
 	}
 
-	List<String> contacts() {
-		try (ExecutorService executorService = Executors.newFixedThreadPool(2)) {
-			executorService.submit(this::extractFromTxtFile);
-			executorService.submit(this::extractFromExcelFile);
+	List<Contact> contacts() {
+		try (ExecutorService service = Executors.newFixedThreadPool(2)) {
+			service.execute(() -> extractFromTxtFile());
+			service.execute(() -> extractFromExcelFile());
 		}
 		return contacts;
 	}
 
-	private final PhoneNumberUtil util = PhoneNumberUtil.getInstance();
-	private final PhoneNumberUtil.PhoneNumberFormat FORMAT = PhoneNumberUtil.PhoneNumberFormat.INTERNATIONAL;
+	private static final PhoneNumberUtil UTIL = PhoneNumberUtil.getInstance();
+	private static final PhoneNumberUtil.PhoneNumberFormat FORMAT = PhoneNumberUtil.PhoneNumberFormat.INTERNATIONAL;
 
-	private String format(String number) {
+	private static String format(String number) {
 		try {
-			return util.format(util.parse(number, "KE"), FORMAT);
+			return UTIL.format(UTIL.parse(number, "KE"), FORMAT);
 		} catch (NumberParseException e) {
 			throw new RuntimeException(e);
 		}
